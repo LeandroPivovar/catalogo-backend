@@ -7,6 +7,8 @@ const db = require('./models');
 const { Op } = require('sequelize');
 const path = require('path');
 const { saveBase64Image } = require('./utils/imageHandler');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -45,6 +47,17 @@ const ASAAS_URL = process.env.ASAAS_BASE_URL || 'https://api-sandbox.asaas.com/v
 const asaasApi = axios.create({
     baseURL: ASAAS_URL,
     headers: { 'access_token': ASAAS_API_KEY }
+});
+
+// CONFIGURAÇÃO SMTP HOSTINGER (Nodemailer)
+const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.hostinger.com',
+    port: process.env.SMTP_PORT || 465,
+    secure: true, // true para 465, false para outras portas
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    }
 });
 
 
@@ -93,6 +106,8 @@ app.post('/api/auth/register', async (req, res) => {
         const savedRgFront = await saveBase64Image(rgFrenteUrl, 'docs');
         const savedRgBack = await saveBase64Image(rgVersoUrl, 'docs');
 
+        const verificationToken = crypto.randomBytes(32).toString('hex');
+
         const user = await db.User.create({
             name,
             email,
@@ -102,11 +117,38 @@ app.post('/api/auth/register', async (req, res) => {
             phone,
             rgFront: savedRgFront,
             rgBack: savedRgBack,
-            status: 'pending'
+            status: 'pending',
+            emailVerified: false,
+            verificationToken: verificationToken
         });
 
+        // ENVIAR E-MAIL DE CONFIRMAÇÃO
+        const verifyUrl = `${process.env.SITE_URL || 'https://putariaonlinebr.com.br'}/api/auth/verify-email/${verificationToken}`;
+
+        const mailOptions = {
+            from: `"Putaria Online" <${process.env.SMTP_USER}>`,
+            to: email,
+            subject: 'Confirme seu e-mail - Putaria Online',
+            html: `
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                    <h2 style="color: #d6244a; text-align: center;">Bem-vinda ao Putaria Online!</h2>
+                    <p>Olá <strong>${name}</strong>,</p>
+                    <p>Obrigado por se cadastrar em nossa plataforma. Para concluir seu cadastro e permitir que nossa equipe analise seu perfil, você precisa confirmar seu endereço de e-mail.</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${verifyUrl}" style="background-color: #d6244a; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">CONFIRMAR MEU E-MAIL</a>
+                    </div>
+                    <p style="font-size: 0.9rem; color: #666;">Se o botão não funcionar, copie e cole o link abaixo no seu navegador:</p>
+                    <p style="font-size: 0.8rem; color: #888; word-break: break-all;">${verifyUrl}</p>
+                    <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+                    <p style="font-size: 0.8rem; color: #999; text-align: center;">Este é um e-mail automático. Por favor, não responda.</p>
+                </div>
+            `
+        };
+
+        transporter.sendMail(mailOptions).catch(err => console.error("Erro ao enviar e-mail:", err));
+
         const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '24h' });
-        res.status(201).json({ message: 'Conta criada. Bem-vindo!', token, user: { id: user.id, name: user.name, email: user.email, status: user.status } });
+        res.status(201).json({ message: 'Conta criada. Verifique seu e-mail!', token, user: { id: user.id, name: user.name, email: user.email, status: user.status } });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -127,9 +169,36 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '24h' });
-        res.json({ token, user: { id: user.id, name: user.name, email: user.email, status: user.status } });
+        res.json({ token, user: { id: user.id, name: user.name, email: user.email, status: user.status, emailVerified: user.emailVerified } });
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// Verificação de E-mail
+app.get('/api/auth/verify-email/:token', async (req, res) => {
+    try {
+        const { token } = req.params;
+        const user = await db.User.findOne({ where: { verificationToken: token } });
+
+        if (!user) {
+            return res.status(400).send('<h1>Token inválido ou expirado.</h1>');
+        }
+
+        await user.update({
+            emailVerified: true,
+            verificationToken: null
+        });
+
+        res.send(`
+            <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+                <h1 style="color: #2ecc71;">E-mail Verificado com Sucesso!</h1>
+                <p>Obrigada por confirmar seu e-mail. Agora seu perfil entrará em nossa fila de análise.</p>
+                <a href="${process.env.SITE_URL || 'https://putariaonlinebr.com.br'}/dashboard" style="display: inline-block; background: #d6244a; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; margin-top: 20px;">Voltar ao Dashboard</a>
+            </div>
+        `);
+    } catch (error) {
+        res.status(500).send('Erro ao verificar e-mail.');
     }
 });
 

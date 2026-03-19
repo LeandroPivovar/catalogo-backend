@@ -86,6 +86,14 @@ module.exports = (sequelize, DataTypes) => {
         boostedAt: {
             type: DataTypes.DATE,
             allowNull: true
+        },
+        emailVerified: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: false
+        },
+        verificationToken: {
+            type: DataTypes.STRING,
+            allowNull: true
         }
     }, {
         sequelize,
