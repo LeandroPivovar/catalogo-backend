@@ -174,7 +174,8 @@ app.get('/api/public/models', async (req, res) => {
     try {
         const users = await db.User.findAll({
             where: {
-                status: { [db.Sequelize.Op.or]: ['approved', 'active'] }
+                status: { [db.Sequelize.Op.or]: ['approved', 'active'] },
+                role: 'user' // Não mostrar administradores no catálogo
             },
             attributes: { exclude: ['password', 'cpf', 'phone', 'email'] },
             order: [
@@ -469,6 +470,53 @@ app.get('/api/payments/status/:paymentIntentId', authenticateToken, async (req, 
         if (!sale) return res.status(404).json({ error: 'Venda não encontrada' });
         res.json({ status: sale.status });
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// WEBHOOK ASAAS: Processamento automático de pagamentos
+app.post('/api/webhooks/asaas', async (req, res) => {
+    try {
+        const payload = req.body;
+        console.log(`[ASAAS WEBHOOK] Evento recebido: ${payload.event}`);
+
+        // 1. Gravar LOG de todas as mensagens (Requisito do Usuário)
+        await db.WebhookLog.create({
+            eventType: payload.event,
+            payload: payload,
+            processed: false
+        });
+
+        // 2. Validar Token de Segurança (Se configurado no .env)
+        const authToken = req.headers['asaas-access-token'];
+        if (process.env.ASAAS_WEBHOOK_TOKEN && authToken !== process.env.ASAAS_WEBHOOK_TOKEN) {
+            console.error("[ASAAS WEBHOOK] Token inválido!");
+            return res.status(401).send();
+        }
+
+        // 3. Processar Pagamento Confirmado
+        if (payload.event === 'PAYMENT_RECEIVED' || payload.event === 'PAYMENT_CONFIRMED') {
+            const paymentId = payload.payment.id;
+
+            const sale = await db.Sale.findOne({ where: { paymentIntentId: paymentId } });
+
+            if (sale && sale.status === 'pending') {
+                const user = await db.User.findByPk(sale.userId);
+                if (user) {
+                    await db.sequelize.transaction(async (t) => {
+                        // Atualizar Venda
+                        await sale.update({ status: 'completed' }, { transaction: t });
+                        // Creditar Usuário
+                        await user.increment('credits', { by: sale.credits, transaction: t });
+                        console.log(`[ASAAS WEBHOOK] Sucesso: ${sale.credits} créditos entregues ao user ${user.id}`);
+                    });
+                }
+            }
+        }
+
+        res.status(200).send('OK');
+    } catch (error) {
+        console.error("[ASAAS WEBHOOK] Erro:", error.message);
         res.status(500).json({ error: error.message });
     }
 });
