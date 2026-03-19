@@ -123,9 +123,9 @@ app.post('/api/auth/register', async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Salvar RGs em disco
-        const savedRgFront = saveBase64Image(rgFrenteUrl, 'docs');
-        const savedRgBack = saveBase64Image(rgVersoUrl, 'docs');
+        // Salvar RGs em disco (com Sharp)
+        const savedRgFront = await saveBase64Image(rgFrenteUrl, 'docs');
+        const savedRgBack = await saveBase64Image(rgVersoUrl, 'docs');
 
         const user = await db.User.create({
             name,
@@ -216,14 +216,14 @@ app.put('/api/user/profile', authenticateToken, async (req, res) => {
 
         if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
 
-        // Salvar Capa em disco
-        const savedCover = saveBase64Image(coverPhotoUrl, 'profiles');
+        // Salvar Capa em disco (com Sharp)
+        const savedCover = await saveBase64Image(coverPhotoUrl, 'profiles');
 
         // Processar Galeria (pode vir como array ou string JSON)
         let galleryArray = Array.isArray(galleryPhotos) ? galleryPhotos : JSON.parse(galleryPhotos || '[]');
 
-        // Converter apenas os Base64s da galeria (filtrar o que já for path)
-        const savedGallery = galleryArray.map(photo => saveBase64Image(photo, 'profiles'));
+        // Converter apenas os Base64s da galeria (processamento paralelo com Sharp)
+        const savedGallery = await Promise.all(galleryArray.map(photo => saveBase64Image(photo, 'profiles')));
 
         await user.update({
             name,

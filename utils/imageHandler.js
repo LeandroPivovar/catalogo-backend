@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const sharp = require('sharp');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 
@@ -10,20 +11,20 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 
 /**
- * Salva uma imagem em Base64 para o disco.
- * @param {string} base64String A string base64 completa (com prefixo data:image/...)
- * @param {string} subfolder Subpasta dentro de uploads (ex: 'profiles', 'docs')
- * @returns {string|null} O caminho relativo para salvar no banco ou null se inválido
+ * Salva uma imagem Base64 em disco com compressão Sharp
+ * @param {string} base64String 
+ * @param {string} subfolder 
+ * @returns {Promise<string>} Caminho relativo da imagem salva
  */
-const saveBase64Image = (base64String, subfolder = '') => {
+const saveBase64Image = async (base64String, subfolder = '') => {
     if (!base64String || typeof base64String !== 'string' || !base64String.includes(';base64,')) {
-        return base64String; // Retorna o que recebeu se não for Base64 (pode ser um path já existente)
+        return base64String;
     }
 
     try {
         const [meta, data] = base64String.split(';base64,');
-        const extension = meta.split('/')[1].split('+')[0]; // ex: png, jpeg
-        const filename = `${uuidv4()}.${extension}`;
+        // Converter para .jpg para compressão otimizada
+        const filename = `${uuidv4()}.jpg`;
 
         const targetDir = path.join(UPLOADS_DIR, subfolder);
         if (!fs.existsSync(targetDir)) {
@@ -33,12 +34,15 @@ const saveBase64Image = (base64String, subfolder = '') => {
         const filePath = path.join(targetDir, filename);
         const buffer = Buffer.from(data, 'base64');
 
-        fs.writeFileSync(filePath, buffer);
+        // PROCESSAMENTO COM SHARP (Performance Máxima)
+        await sharp(buffer)
+            .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 80, mozjpeg: true })
+            .toFile(filePath);
 
-        // Retorna o path relativo que será servido pelo Express
         return `/uploads/${subfolder ? subfolder + '/' : ''}${filename}`;
     } catch (error) {
-        console.error('Erro ao salvar imagem:', error);
+        console.error('Erro ao processar imagem com Sharp:', error);
         return null;
     }
 };
