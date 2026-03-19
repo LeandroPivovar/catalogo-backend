@@ -124,8 +124,8 @@ app.post('/api/auth/register', async (req, res) => {
             cpf,
             birthDate,
             phone,
-            rgFrenteUrl,
-            rgVersoUrl,
+            rgFront: rgFrenteUrl,
+            rgBack: rgVersoUrl,
             status: 'pending'
         });
 
