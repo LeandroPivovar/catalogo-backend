@@ -47,42 +47,7 @@ const asaasApi = axios.create({
     headers: { 'access_token': ASAAS_API_KEY }
 });
 
-app.post('/api/payments/webhook', express.json({ type: 'application/json' }), async (req, res) => {
-    // No Asaas, a segurança é via token no header
-    const asaasToken = req.headers['asaas-access-token'];
-    if (asaasToken !== process.env.ASAAS_WEBHOOK_TOKEN) {
-        return res.status(401).json({ error: 'Não autorizado' });
-    }
 
-    const { event, payment } = req.body;
-
-    // Registrar log do webhook
-    await db.WebhookLog.create({
-        eventType: event,
-        payload: req.body,
-        processed: false
-    });
-
-    if (event === 'PAYMENT_RECEIVED') {
-        const asaasPaymentId = payment.id;
-
-        // Encontrar a venda correspondente
-        const sale = await db.Sale.findOne({ where: { paymentIntentId: asaasPaymentId } });
-
-        if (sale && sale.status === 'pending') {
-            const user = await db.User.findByPk(sale.userId);
-            if (user) {
-                // Creditar o usuário
-                await user.increment('credits', { by: sale.credits });
-                // Marcar venda como concluída
-                await sale.update({ status: 'completed' });
-                console.log(`Sucesso Asaas: ${sale.credits} créditos adicionados ao usuário ${user.id}`);
-            }
-        }
-    }
-
-    res.status(200).send('OK');
-});
 
 
 // Middleware de Autenticação
@@ -483,16 +448,16 @@ app.get('/api/payments/status/:paymentIntentId', authenticateToken, async (req, 
 app.post('/api/webhooks/asaas', async (req, res) => {
     try {
         const payload = req.body;
-        console.log(`[ASAAS WEBHOOK] Evento recebido: ${payload.event}`);
+        console.log(`[ASAAS WEBHOOK] Evento recebido: ${payload.event} para pagamento: ${payload.payment?.id}`);
 
-        // 1. Gravar LOG de todas as mensagens (Requisito do Usuário)
-        await db.WebhookLog.create({
+        // 1. Gravar LOG de todas as mensagens
+        const log = await db.WebhookLog.create({
             eventType: payload.event,
             payload: payload,
             processed: false
         });
 
-        // 2. Validar Token de Segurança (Se configurado no .env)
+        // 2. Validar Token de Segurança
         const authToken = req.headers['asaas-access-token'];
         if (process.env.ASAAS_WEBHOOK_TOKEN && authToken !== process.env.ASAAS_WEBHOOK_TOKEN) {
             console.error("[ASAAS WEBHOOK] Token inválido!");
@@ -502,10 +467,13 @@ app.post('/api/webhooks/asaas', async (req, res) => {
         // 3. Processar Pagamento Confirmado
         if (payload.event === 'PAYMENT_RECEIVED' || payload.event === 'PAYMENT_CONFIRMED') {
             const paymentId = payload.payment.id;
+            console.log(`[ASAAS WEBHOOK] Buscando Venda com Intent: ${paymentId}`);
 
             const sale = await db.Sale.findOne({ where: { paymentIntentId: paymentId } });
 
-            if (sale && sale.status === 'pending') {
+            if (!sale) {
+                console.warn(`[ASAAS WEBHOOK] Venda não encontrada para Intent: ${paymentId}`);
+            } else if (sale.status === 'pending') {
                 const user = await db.User.findByPk(sale.userId);
                 if (user) {
                     await db.sequelize.transaction(async (t) => {
@@ -513,15 +481,25 @@ app.post('/api/webhooks/asaas', async (req, res) => {
                         await sale.update({ status: 'completed' }, { transaction: t });
                         // Creditar Usuário
                         await user.increment('credits', { by: sale.credits, transaction: t });
-                        console.log(`[ASAAS WEBHOOK] Sucesso: ${sale.credits} créditos entregues ao user ${user.id}`);
+                        // Marcar log como processado
+                        await log.update({ processed: true }, { transaction: t });
+                        console.log(`[ASAAS WEBHOOK] SUCESSO: ${sale.credits} créditos entregues ao user ${user.id}`);
                     });
+                } else {
+                    console.error(`[ASAAS WEBHOOK] Usuário ${sale.userId} não encontrado para a venda ${sale.id}`);
                 }
+            } else {
+                console.log(`[ASAAS WEBHOOK] Venda ${sale.id} já estava com status: ${sale.status}`);
+                await log.update({ processed: true });
             }
+        } else {
+            // Outros eventos (vencimento, etc), apenas marcar como ok para não disparar retry
+            await log.update({ processed: true });
         }
 
         res.status(200).send('OK');
     } catch (error) {
-        console.error("[ASAAS WEBHOOK] Erro:", error.message);
+        console.error("[ASAAS WEBHOOK] Erro Crítico:", error.message);
         res.status(500).json({ error: error.message });
     }
 });
