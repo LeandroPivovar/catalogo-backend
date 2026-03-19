@@ -224,7 +224,8 @@ app.get('/api/public/models', async (req, res) => {
         const users = await db.User.findAll({
             where: {
                 status: { [db.Sequelize.Op.or]: ['approved', 'active'] },
-                role: 'user' // Não mostrar administradores no catálogo
+                role: 'user', // Não mostrar administradores no catálogo
+                coverPhotoUrl: { [db.Sequelize.Op.and]: [{ [db.Sequelize.Op.ne]: null }, { [db.Sequelize.Op.ne]: '' }] }
             },
             attributes: { exclude: ['password', 'cpf', 'phone', 'email'] },
             order: [
@@ -301,9 +302,12 @@ app.post('/api/user/boost', authenticateToken, async (req, res) => {
 
         if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
 
-        const boostCost = 50;
+        // BUSCAR CUSTO DINÂMICO
+        const setting = await db.Setting.findOne({ where: { key: 'boost_cost' } });
+        const boostCost = setting ? parseInt(setting.value) : 10;
+
         if (user.credits < boostCost) {
-            return res.status(400).json({ error: 'Créditos insuficientes para impulsionar.' });
+            return res.status(400).json({ error: `Saldo insuficiente. Esté destaque custa ${boostCost} créditos.` });
         }
 
         const boostTime = date ? new Date(date) : new Date();
@@ -698,6 +702,34 @@ app.put('/api/admin/plans/:id', authenticateAdmin, async (req, res) => {
     }
 });
 
+// --- ROTAS DE CONFIGURAÇÕES GERAIS ---
+app.get('/api/admin/settings', authenticateAdmin, async (req, res) => {
+    try {
+        const settings = await db.Setting.findAll();
+        res.json(settings);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/admin/settings', authenticateAdmin, async (req, res) => {
+    try {
+        const { key, value } = req.body;
+        const [setting, created] = await db.Setting.findOrCreate({
+            where: { key },
+            defaults: { value }
+        });
+
+        if (!created) {
+            await setting.update({ value });
+        }
+
+        res.json({ message: 'Configuração atualizada com sucesso', setting });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Estatísticas Financeiras Detalhadas
 app.get('/api/admin/finance', authenticateAdmin, async (req, res) => {
     try {
@@ -811,6 +843,13 @@ db.sequelize.sync({ alter: true }).then(async () => {
             { id: 'premium', price: 159.90, credits: 1000 }
         ]);
         console.log('Planos iniciais criados.');
+    }
+
+    // Garantir Configurações Padrão
+    const boostCostExists = await db.Setting.findOne({ where: { key: 'boost_cost' } });
+    if (!boostCostExists) {
+        await db.Setting.create({ key: 'boost_cost', value: '10' });
+        console.log('Configuração inicial criada: boost_cost = 10');
     }
 
     app.listen(PORT, () => {
