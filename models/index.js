@@ -10,7 +10,20 @@ const config = require(__dirname + '/../config/config.json')[env];
 const db = {};
 
 let sequelize;
-if (config.use_env_variable) {
+const dbConfig = {
+  host: process.env.DB_HOST || config.host || '127.0.0.1',
+  dialect: 'mysql',
+  logging: false
+};
+
+if (process.env.DB_NAME) {
+  sequelize = new Sequelize(
+    process.env.DB_NAME,
+    process.env.DB_USER,
+    process.env.DB_PASS,
+    dbConfig
+  );
+} else if (config.use_env_variable) {
   sequelize = new Sequelize(process.env[config.use_env_variable], config);
 } else {
   sequelize = new Sequelize(config.database, config.username, config.password, config);
