@@ -57,8 +57,7 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.TEXT('long')
         },
         galleryPhotos: {
-            type: DataTypes.TEXT('long'),
-            defaultValue: '[]'
+            type: DataTypes.TEXT('long')
         },
         credits: {
             type: DataTypes.INTEGER,
