@@ -294,7 +294,7 @@ app.put('/api/user/password', authenticateToken, async (req, res) => {
 
 // --- ROTAS DE ANALYTICS (NÚCLEO DO ECHARTS) ---
 
-const { Op } = require('sequelize');
+
 
 // POST: Registrar Evento de Analytics (Público, chamado pelo Catálogo)
 app.post('/api/analytics/track', async (req, res) => {
