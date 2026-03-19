@@ -96,9 +96,15 @@ app.post('/api/auth/register', async (req, res) => {
         const { name, email, password, cpf, birthDate, phone, rgFrenteUrl, rgVersoUrl } = req.body;
         console.log(`[AUTH] Iniciando cadastro para: ${email}`);
 
-        const existingUser = await db.User.findOne({ where: { email } });
+        const existingUser = await db.User.findOne({
+            where: {
+                [db.Sequelize.Op.or]: [{ email }, { cpf }]
+            }
+        });
+
         if (existingUser) {
-            return res.status(400).json({ error: 'E-mail já cadastrado' });
+            const field = existingUser.email === email ? 'E-mail' : 'CPF';
+            return res.status(400).json({ error: `${field} já cadastrado` });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
