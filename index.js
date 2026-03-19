@@ -323,14 +323,18 @@ app.get('/api/analytics/dashboard', authenticateToken, async (req, res) => {
         const period = req.query.period || 'weekly';
         const daysOffset = period === 'monthly' ? 30 : 7;
         const now = new Date();
+        // Resetar para o início do dia para garantir que pega tudo de 'hoje'
+        now.setHours(23, 59, 59, 999);
 
         const currentStart = new Date(now);
         currentStart.setDate(currentStart.getDate() - daysOffset);
+        currentStart.setHours(0, 0, 0, 0); // Início do período
 
         const previousStart = new Date(currentStart);
         previousStart.setDate(previousStart.getDate() - daysOffset);
 
-        const modelId = req.user.id;
+        const modelId = Number(req.user.id);
+        if (isNaN(modelId)) return res.status(400).json({ error: 'ID de usuário inválido no token' });
 
         // Current KPIs
         const currentTotalViews = await db.AnalyticsEvent.count({
