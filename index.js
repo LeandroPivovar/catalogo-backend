@@ -4,6 +4,7 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const db = require('./models');
+const { Op } = require('sequelize');
 const path = require('path');
 const { saveBase64Image } = require('./utils/imageHandler');
 
