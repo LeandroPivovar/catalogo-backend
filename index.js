@@ -156,7 +156,8 @@ app.post('/api/auth/register', async (req, res) => {
         const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '24h' });
         res.status(201).json({ message: 'Conta criada. Verifique seu e-mail!', token, user: { id: user.id, name: user.name, email: user.email, status: user.status } });
     } catch (error) {
-        console.error(`[AUTH] Erro crítico no cadastro (${email}):`, error);
+        const emailLabel = (req.body && req.body.email) ? req.body.email : 'desconhecido';
+        console.error(`[AUTH] Erro crítico no cadastro (${emailLabel}):`, error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -773,6 +774,14 @@ app.get('/api/admin/finance', authenticateAdmin, async (req, res) => {
 
 // Inicialização segura
 db.sequelize.sync({ alter: true }).then(async () => {
+    // Garantir colunas extras (failsafe para produção)
+    try {
+        await db.sequelize.query("ALTER TABLE Users ADD COLUMN emailVerified BOOLEAN DEFAULT FALSE").catch(() => { });
+        await db.sequelize.query("ALTER TABLE Users ADD COLUMN verificationToken VARCHAR(255)").catch(() => { });
+    } catch (e) {
+        console.log("Colunas já existem ou erro silencioso de schema.");
+    }
+
     // Garantir Admin Padrão
     const adminExists = await db.User.findOne({ where: { role: 'admin' } });
     if (!adminExists) {
