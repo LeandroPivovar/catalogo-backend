@@ -93,12 +93,12 @@ const authenticateAdmin = (req, res, next) => {
 // Registro
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { name, email, password, cpf, birthDate, phone, rgFrenteUrl, rgVersoUrl } = req.body;
-        console.log(`[AUTH] Iniciando cadastro para: ${email}`);
+        const { name, email, password, cpf, birthDate, phone, rgFrenteUrl, rgVersoUrl, role = 'visualizador' } = req.body;
+        console.log(`[AUTH] Iniciando cadastro para: ${email} como ${role}`);
 
         const existingUser = await db.User.findOne({
             where: {
-                [db.Sequelize.Op.or]: [{ email }, { cpf }]
+                [db.Sequelize.Op.or]: [{ email }, ...(cpf ? [{ cpf }] : [])]
             }
         });
 
@@ -107,13 +107,22 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(400).json({ error: `${field} já cadastrado` });
         }
 
+        // Validação Modelo: CPF Obrigatório
+        if (role === 'modelo' && !cpf) {
+            return res.status(400).json({ error: 'CPF é obrigatório para modelos' });
+        }
+
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Salvar RGs em disco (com Sharp)
-        console.log(`[AUTH] Processando imagens de documentos...`);
-        const savedRgFront = await saveBase64Image(rgFrenteUrl, 'docs');
-        const savedRgBack = await saveBase64Image(rgVersoUrl, 'docs');
-        console.log(`[AUTH] Imagens salvas em /uploads/docs/`);
+        // Salvar RGs em disco (se fornecidos)
+        let savedRgFront = null;
+        let savedRgBack = null;
+        if (rgFrenteUrl && rgVersoUrl) {
+            console.log(`[AUTH] Processando imagens de documentos...`);
+            savedRgFront = await saveBase64Image(rgFrenteUrl, 'docs');
+            savedRgBack = await saveBase64Image(rgVersoUrl, 'docs');
+            console.log(`[AUTH] Imagens salvas em /uploads/docs/`);
+        }
 
         const verificationToken = crypto.randomBytes(32).toString('hex');
 
@@ -126,7 +135,8 @@ app.post('/api/auth/register', async (req, res) => {
             phone,
             rgFront: savedRgFront,
             rgBack: savedRgBack,
-            status: 'pending',
+            role,
+            status: role === 'modelo' ? 'pending' : 'active', // Visualizadores começam ativos
             emailVerified: false,
             verificationToken: verificationToken
         });
@@ -183,7 +193,7 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '24h' });
-        res.json({ token, user: { id: user.id, name: user.name, email: user.email, status: user.status, emailVerified: user.emailVerified } });
+        res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, status: user.status, emailVerified: user.emailVerified } });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -224,7 +234,7 @@ app.get('/api/public/models', async (req, res) => {
         const users = await db.User.findAll({
             where: {
                 status: { [db.Sequelize.Op.or]: ['approved', 'active'] },
-                role: 'user', // Não mostrar administradores no catálogo
+                role: 'modelo', // Exclusivo para modelos
                 coverPhotoUrl: { [db.Sequelize.Op.and]: [{ [db.Sequelize.Op.ne]: null }, { [db.Sequelize.Op.ne]: '' }] }
             },
             attributes: { exclude: ['password', 'cpf', 'phone', 'email'] },
@@ -613,9 +623,9 @@ app.post('/api/admin/login', async (req, res) => {
 // Dashboard Stats (KPIs Reais)
 app.get('/api/admin/stats', authenticateAdmin, async (req, res) => {
     try {
-        const totalUsers = await db.User.count({ where: { role: 'user' } });
-        const activeUsers = await db.User.count({ where: { role: 'user', status: 'active' } });
-        const pendingUsers = await db.User.count({ where: { role: 'user', status: 'pending' } });
+        const totalUsers = await db.User.count({ where: { role: { [db.Sequelize.Op.ne]: 'admin' } } });
+        const activeUsers = await db.User.count({ where: { role: 'modelo', status: 'active' } });
+        const pendingUsers = await db.User.count({ where: { role: 'modelo', status: 'pending' } });
 
         // Faturamento Total (Soma de Vendas Completas)
         const totalRevenue = await db.Sale.sum('amount', { where: { status: 'completed' } }) || 0;
@@ -636,7 +646,7 @@ app.get('/api/admin/stats', authenticateAdmin, async (req, res) => {
 app.get('/api/admin/users', authenticateAdmin, async (req, res) => {
     try {
         const users = await db.User.findAll({
-            where: { role: 'user' },
+            where: { role: { [db.Sequelize.Op.ne]: 'admin' } },
             order: [['createdAt', 'DESC']]
         });
         res.json(users);

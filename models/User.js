@@ -69,7 +69,7 @@ module.exports = (sequelize, DataTypes) => {
         },
         role: {
             type: DataTypes.STRING,
-            defaultValue: 'user' // user, admin
+            defaultValue: 'visualizador' // admin, modelo, visualizador
         },
         rgFront: {
             type: DataTypes.STRING,
