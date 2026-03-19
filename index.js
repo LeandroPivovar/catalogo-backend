@@ -94,6 +94,7 @@ const authenticateAdmin = (req, res, next) => {
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { name, email, password, cpf, birthDate, phone, rgFrenteUrl, rgVersoUrl } = req.body;
+        console.log(`[AUTH] Iniciando cadastro para: ${email}`);
 
         const existingUser = await db.User.findOne({ where: { email } });
         if (existingUser) {
@@ -103,8 +104,10 @@ app.post('/api/auth/register', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         // Salvar RGs em disco (com Sharp)
+        console.log(`[AUTH] Processando imagens de documentos...`);
         const savedRgFront = await saveBase64Image(rgFrenteUrl, 'docs');
         const savedRgBack = await saveBase64Image(rgVersoUrl, 'docs');
+        console.log(`[AUTH] Imagens salvas em /uploads/docs/`);
 
         const verificationToken = crypto.randomBytes(32).toString('hex');
 
@@ -123,6 +126,7 @@ app.post('/api/auth/register', async (req, res) => {
         });
 
         // ENVIAR E-MAIL DE CONFIRMAÇÃO
+        console.log(`[AUTH] Gerando e-mail de confirmação para: ${email}`);
         const verifyUrl = `${process.env.SITE_URL || 'https://putariaonlinebr.com.br'}/api/auth/verify-email/${verificationToken}`;
 
         const mailOptions = {
@@ -145,11 +149,14 @@ app.post('/api/auth/register', async (req, res) => {
             `
         };
 
-        transporter.sendMail(mailOptions).catch(err => console.error("Erro ao enviar e-mail:", err));
+        transporter.sendMail(mailOptions)
+            .then(() => console.log(`[AUTH] E-mail de verificação enviado com sucesso para: ${email}`))
+            .catch(err => console.error(`[AUTH] Erro ao enviar e-mail para ${email}:`, err.message));
 
         const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '24h' });
         res.status(201).json({ message: 'Conta criada. Verifique seu e-mail!', token, user: { id: user.id, name: user.name, email: user.email, status: user.status } });
     } catch (error) {
+        console.error(`[AUTH] Erro crítico no cadastro (${email}):`, error);
         res.status(500).json({ error: error.message });
     }
 });
