@@ -8,7 +8,25 @@ const db = require('./models');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+const allowedOrigins = [
+    'http://localhost:8080',
+    'http://localhost:3000',
+    'https://putariaonlinebr.com.br',
+    'https://www.putariaonlinebr.com.br'
+];
+
+app.use(cors({
+    origin: function (origin, callback) {
+        // permitindo requisições sem origin (como apps mobile ou curl)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1) {
+            const msg = 'A política CORS para este site não permite acesso a partir da Origem especificada.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    },
+    credentials: true
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
