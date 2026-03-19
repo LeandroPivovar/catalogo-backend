@@ -4,6 +4,8 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const db = require('./models');
+const path = require('path');
+const { saveBase64Image } = require('./utils/imageHandler');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -29,6 +31,9 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// --- SERVIR ARQUIVOS ESTÁTICOS (UPLOADS) ---
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // --- INTEGRAÇÃO ASAAS (PIX) ---
 const axios = require('axios');
@@ -117,6 +122,11 @@ app.post('/api/auth/register', async (req, res) => {
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Salvar RGs em disco
+        const savedRgFront = saveBase64Image(rgFrenteUrl, 'docs');
+        const savedRgBack = saveBase64Image(rgVersoUrl, 'docs');
+
         const user = await db.User.create({
             name,
             email,
@@ -124,8 +134,8 @@ app.post('/api/auth/register', async (req, res) => {
             cpf,
             birthDate,
             phone,
-            rgFront: rgFrenteUrl,
-            rgBack: rgVersoUrl,
+            rgFront: savedRgFront,
+            rgBack: savedRgBack,
             status: 'pending'
         });
 
@@ -205,7 +215,14 @@ app.put('/api/user/profile', authenticateToken, async (req, res) => {
 
         if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
 
-        const processedGallery = typeof galleryPhotos === 'string' ? galleryPhotos : JSON.stringify(galleryPhotos || []);
+        // Salvar Capa em disco
+        const savedCover = saveBase64Image(coverPhotoUrl, 'profiles');
+
+        // Processar Galeria (pode vir como array ou string JSON)
+        let galleryArray = Array.isArray(galleryPhotos) ? galleryPhotos : JSON.parse(galleryPhotos || '[]');
+
+        // Converter apenas os Base64s da galeria (filtrar o que já for path)
+        const savedGallery = galleryArray.map(photo => saveBase64Image(photo, 'profiles'));
 
         await user.update({
             name,
@@ -214,8 +231,8 @@ app.put('/api/user/profile', authenticateToken, async (req, res) => {
             telegram,
             instagram,
             externalLink,
-            coverPhotoUrl,
-            galleryPhotos: processedGallery
+            coverPhotoUrl: savedCover,
+            galleryPhotos: JSON.stringify(savedGallery)
         });
 
         res.json({ message: 'Perfil atualizado com sucesso', user });
