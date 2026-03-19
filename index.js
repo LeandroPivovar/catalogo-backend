@@ -765,7 +765,7 @@ app.get('/api/admin/finance', authenticateAdmin, async (req, res) => {
 });
 
 // Inicialização segura
-db.sequelize.sync().then(async () => {
+db.sequelize.sync({ alter: true }).then(async () => {
     // Garantir Admin Padrão
     const adminExists = await db.User.findOne({ where: { role: 'admin' } });
     if (!adminExists) {
